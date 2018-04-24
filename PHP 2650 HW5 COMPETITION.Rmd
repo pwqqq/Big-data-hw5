@@ -1,0 +1,55 @@
+---
+title: "php 2650 hw5"
+date: "4/22/2018"
+output: html_document
+---
+
+```{r}
+library(data.table)
+require(Matrix)
+require(data.table)
+install.packages("drat", repos="https://cran.rstudio.com")
+drat:::addRepo("dmlc")
+install.packages("xgboost", repos="http://dmlc.ml/drat/", type = "source")
+require(xgboost)
+
+```
+
+
+```{r}
+# read in test data
+test <- fread("~/Desktop/Predict_NoShow_PrivateTest_WithoutLabels.csv", header = TRUE)
+# read in train data
+train_total <- fread("Predict_NoShow_Train.csv", header = TRUE)
+
+df <- data.table(train, keep.rownames = F)
+# convert dataframe to sparse matrix, which is fit for XGBOOST
+sparse_matrix <- sparse.model.matrix(Status~.-1, data = df)
+head(sparse_matrix)
+# define output vector, which is the y column
+output_vector = df[,Status] == "Show-Up"
+# parameters could be redefined after discussion
+bst <- xgboost(data =sparse_matrix , label = output_vector, max.depth =20, 
+                     eta = 1, nthread = 2, nround = 500, objective = "binary:logistic")
+# another way to seperate dataset 
+dtrain <- xgb.DMatrix(data = sparse_matrix, label = output_vector)
+bstDMatrix <- xgboost(data = dtrain, max.depth = 2, eta = 1, nthread = 2, nround = 20, objective = "binary:logistic")
+
+bst <- xgb.train(data=dtrain, booster = "gblinear", max.depth=2, nthread = 2, nround=2,  eval.metric = "error", eval.metric = "logloss", objective = "binary:logistic")
+
+# build model for prediction
+# have not tested result
+fake.outcome1 <- c(rep(1,50),rep(1,50))
+test$Status <- fake.outcome1
+dftest <- data.table(test, keep.rownames = F)
+sparse_matrix.test <- sparse.model.matrix(Status~.-1, data = dftest)
+pred <- predict(bst, sparse_matrix.test)
+prediction <- as.numeric(pred > 0.5)
+upload <- cbind(dftest$ID, prediction)
+
+
+
+```
+
+
+
