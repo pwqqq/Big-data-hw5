@@ -19,8 +19,8 @@ library(klaR)
 
 ```{r}
 # read in test data
-#test <- fread("~/Desktop/Predict_NoShow_PrivateTest_WithoutLabels.csv", header = TRUE)
-#test2 <- fread("~/Desktop/Predict_NoShow_PublicTest_WithoutLabels.csv", header = TRUE)
+#test <- fread("Predict_NoShow_PrivateTest_WithoutLabels.csv", header = TRUE)
+#test2 <- fread("Predict_NoShow_PublicTest_WithoutLabels.csv", header = TRUE)
 
 # read in train data
 train_total <- fread("Predict_NoShow_Train.csv", header = TRUE)
@@ -28,7 +28,6 @@ train_total <- train_total[,-4] # delete first date column
 train_total <- train_total[,-4] # delete second date column
 id <- train_total[,1] # delete ID column
 train_total <- train_total[,-1] # save ID column for further use 
-
 
 # train data 2/3
 train <- train_total[1:120000]
@@ -110,4 +109,26 @@ write.table(upload2, file = "public.csv", sep = ",", col.names=FALSE, row.names 
 ```
 
 
+```{r}
+#KNN
+library(KODAMA)
+library(dplyr)
+library(class)
+library(gmodels)
+train_total$Gender<-as.numeric(train_total$Gender)
+train_total$DayOfTheWeek<-as.numeric(factor(train_total$DayOfTheWeek))
+train_total$Status<-as.numeric(factor(train_total$Status))
+normalize <- function(x) {
+return ((x - min(x)) / (max(x) - min(x))) }
+train[,1]<-normalize(train[,1])
+train[,3]<-normalize(train[,3])
+train.x<-as.matrix(train[,1:12])
+test[,1]<-normalize(test[,1])
+test[,3]<-normalize(test[,3])
+test.x<-as.matrix(test[,1:12])
+test.response<-test[,13]
+response<-as.matrix(train[,13])
+pred<-knn(train = train.x,test = test.x,cl=response,k=10)
+CrossTable(test.response,pred,prop.chisq = F)
+```
 
