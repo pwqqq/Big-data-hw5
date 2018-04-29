@@ -23,25 +23,25 @@ library(klaR)
 #test2 <- fread("Predict_NoShow_PublicTest_WithoutLabels.csv", header = TRUE)
 
 # read in train data
-train_total <- fread("Predict_NoShow_Train.csv", header = TRUE)
+train_total <- fread("/Users/weiqipan/Desktop/Predict_NoShow_Train.csv", header = TRUE)
 train_total <- train_total[,-4] # delete first date column
 train_total <- train_total[,-4] # delete second date column
 id <- train_total[,1] # delete ID column
 train_total <- train_total[,-1] # save ID column for further use 
 
 # train data 2/3
-train <- train_total[1:120000]
+train <- train_total[1:180000]
 # test data 1/3
-test <- train_total[120001:180000]
+#test <- train_total[120001:180000]
 
 df <- data.table(train, keep.rownames = F)
 # convert dataframe to sparse matrix, which is fit for XGBOOST
 sparse_matrix <- sparse.model.matrix(Status~.-1, data = df)
 # define output vector, which is the y column
-output_vector = df[,Status] == "Show-Up"
+output_vector = df[,Status] == "No-Show"
 # parameters could be redefined after discussio
-bst <- xgboost(data =sparse_matrix , label = output_vector, max.depth =7, 
-                     eta = 0.2, nthread = 2, nround = 200, objective = "binary:logistic")
+bst <- xgboost(data =sparse_matrix , label = output_vector, max.depth =10, 
+                     eta = 0.01, nthread = 2, nround = 200, objective = "binary:logistic",eval_metric="logloss")
 # another way to seperate dataset 
 #dtrain <- xgb.DMatrix(data = sparse_matrix, label = output_vector)
 #bstDMatrix <- xgboost(data = dtrain, max.depth = 2, eta = 1, nthread = 2, nround = 20, objective = "binary:logistic")
@@ -84,25 +84,37 @@ auc(roc_obj)
 ```{r}
 # build model for prediction
 # have not tested result
-fake.outcome1 <- c(rep(1,50),rep(1,50))
-test$Status <- fake.outcome1
+test <- fread("~/Desktop/Predict_NoShow_PrivateTest_WithoutLabels.csv", header = TRUE)
+test2 <- fread("~/Desktop/Predict_NoShow_PublicTest_WithoutLabels.csv", header = TRUE)
+
+id_private <- test$ID
+test <- test[,-4] # delete first date column
+test <- test[,-4] # delete second date column
+test <- test[,-1] # delete ID column
+
+fake.outcome <- c(rep(1,50),rep(1,50))
+test$Status <- fake.outcome
 dftest <- data.table(test, keep.rownames = F)
 sparse_matrix.test <- sparse.model.matrix(Status~.-1, data = dftest)
 pred <- predict(bst, sparse_matrix.test)
 #prediction <- as.numeric(pred > 0.5)
-upload <- cbind(dftest$ID, pred)
+upload_private <- cbind(id_private, pred)
 
+id_public <- test2$ID
+test2 <- test2[,-4] # delete first date column
+test2 <- test2[,-4] # delete second date column
+test2 <- test2[,-1] # delete ID column
 
-test2$Status <- fake.outcome1
+test2$Status <- fake.outcome
 dftest2 <- data.table(test2, keep.rownames = F)
 sparse_matrix.test2 <- sparse.model.matrix(Status~.-1, data = dftest2)
 pred2 <- predict(bst, sparse_matrix.test2)
-#prediction2 <- as.numeric(pred2 > 0.5)
-upload2 <- cbind(dftest2$ID, pred2)
+#prediction <- as.numeric(pred > 0.5)
+upload_public <- cbind(id_public, pred2)
 
+write.table(upload_private, file = "private.csv", sep = ",", col.names=FALSE, row.names = FALSE)
+write.table(upload_public, file = "public.csv", sep = ",", col.names=FALSE, row.names = FALSE)
 
-write.table(upload, file = "private.csv", sep = ",", col.names=FALSE, row.names = FALSE)
-write.table(upload2, file = "public.csv", sep = ",", col.names=FALSE, row.names = FALSE)
 
 
 
