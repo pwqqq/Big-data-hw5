@@ -1,0 +1,217 @@
+---
+title: "prediction"
+author: "Annie Yang"
+date: "5/7/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(xgboost)
+library(data.table)
+library(Matrix)
+library(pROC)
+library(dplyr)
+library(purrr)
+library(tidyverse)
+library(lubridate)
+library(Matrix)
+library(MLmetrics)
+library(caret)
+library(glmnet)
+```
+
+
+```{r}
+# Import data
+train <- fread("Predict_NoShow_Train.csv")
+
+# Check missing data
+
+train%>%
+  map_df(function(col) sum(is.na(col)))%>%
+  gather()%>%
+  summarise(count_of_nas = sum(value,na.rm=T))
+
+### there is no missing data in the dataset
+
+# Manipulate date
+train$DateAppointmentWasMade <- as.Date(train$DateAppointmentWasMade)
+train$DateOfAppointment <- as.Date(train$DateOfAppointment)
+train$month <- format(train$DateOfAppointment,"%m")
+
+
+# Remove unnecessary variable
+data.train <- subset(train, select = -c(ID,DateAppointmentWasMade,DateOfAppointment))
+data.train <- model.matrix(~., data = data.train)[,-1]
+
+# Change column name
+colnames(data.train)[18] <- "Status"
+# Label no-show as 1
+data.train[,18]<-abs(data.train[,18]-1)
+
+x <- subset(data.train, select = -c(Status))
+y <- subset(data.train, select = Status)
+```
+
+### Parameter Tuning
+```{r}
+grid <- expand.grid(nrounds   = 250, #c(250,300)
+                    max_depth = c(6,7,8),
+                    eta       = 0.01,
+                    gamma     = c(4,5),
+                    colsample_bytree = 0.5,
+                    min_child_weight = 1,
+                    subsample = 0.5)
+
+# 10 fold Cross-validation
+ctrl <- trainControl(method = "cv",
+                     number = 5,
+                     summaryFunction = mnLogLoss, 
+                     classProbs      = TRUE,
+                     allowParallel   = TRUE)
+
+set.seed(1234) # Set the seed to create reproducible train and test sets.
+xgbTune <- caret::train(x = x,
+                        y=as.factor(make.names(y)),
+                method    = "xgbTree",
+                tuneGrid  = grid,
+                verbose=T,
+                metric="logLoss",
+                trControl = ctrl)
+```
+
+### After parameter tuning, we got nrounds=300, eta=0.02, max_depth=6, gamma = 5
+#### Check model performance on test data
+```{r}
+set.seed(111)
+train_rows <- sample(1:nrow(train), (2/3)*nrow(train))
+x.train <- x[train_rows,]
+x.test <- x[-train_rows,]
+
+y.train <- y[train_rows,]
+y.test <- y[-train_rows,]
+
+dtrain <- xgb.DMatrix(data = x.train, label = y.train)
+dtest <- xgb.DMatrix(data = x.test, label = y.test)
+
+xgb_params <- list(
+  colsample_bytree = 0.5, #It control the number of features (variables) supplied to a tree
+  subsample = 0.5, #It controls the number of samples (observations) supplied to a tree
+  booster = "gbtree",
+  max_depth = 7, #It controls the depth of the tree
+  eta = 0.01, #shrinkage rate to control overfitting through conservative approach
+  gamma = 4,
+  min_child_weight=1,
+  objective = "binary:logistic"
+  )
+
+xgb.t <- xgb.train (params = xgb_params, data = dtrain, nrounds = 250, watchlist = list(val=dtest,train=dtrain), print_every_n = 50, maximize = F , eval_metric = "logloss")
+
+### Check auc and logloss on test data
+pred.t <- predict(xgb.t,x.test)
+# Test auc
+roc_obj <- roc(y.test,pred.t)
+auc(roc_obj)
+
+# Log loss
+LogLoss(pred.t, y.test)
+```
+
+#### Training the model on the whole dataset
+```{r}
+# Use logloss as evaluation metric
+xgb <- xgboost(data = x, label = y, nrounds = 250,eta=0.01, gamma=4, max_depth=7, min_child_weight=1, subsample=0.5, colsample_bytree=0.5,objective = "binary:logistic", eval_metric = "logloss",print_every_n = 50)
+
+```
+
+
+```{r}
+
+Private_test <- fread("Predict_NoShow_PrivateTest_WithoutLabels.csv")
+Public_test <- fread("Predict_NoShow_PublicTest_WithoutLabels.csv")
+#Private
+Private_test$DateOfAppointment <- as.Date(Private_test$DateOfAppointment)
+Private_test$month <- format(Private_test$DateOfAppointment,"%m")
+
+Private.x.test <- subset(Private_test, select = -c(ID,DateAppointmentWasMade,DateOfAppointment))
+Private.x.test <- model.matrix(~., data = Private.x.test)[,-1]
+
+Private.pred.xgb <- predict(xgb,Private.x.test)
+Private.pred.xgb <- cbind(Private_test$ID,Private.pred.xgb )
+write.table(Private.pred.xgb, file = "private.csv", sep = ",", col.names=FALSE, row.names = FALSE)
+
+
+#Public
+Public_test$DateOfAppointment <- as.Date(Public_test$DateOfAppointment)
+Public_test$month <- format(Public_test$DateOfAppointment,"%m")
+
+Public.x.test <- subset(Public_test, select = -c(ID,DateAppointmentWasMade,DateOfAppointment))
+Public.x.test <- model.matrix(~., data = Public.x.test)[,-1]
+
+Public.pred.xgb <- predict(xgb,Public.x.test)
+Public.pred.xgb <- cbind(Public_test$ID,Public.pred.xgb )
+write.table(Public.pred.xgb, file = "public.csv", sep = ",", col.names=FALSE, row.names = FALSE)
+
+```
+
+###Penalized logistic regression
+```{r}
+# Create a vector of lambda values
+lambda <- 10^seq(10, -2, length = 100)
+
+# Lasso model
+x1 <- as.matrix(x)
+y1 <- as.factor(y)
+
+a <- rep(0,nrow(Private.x.test))
+month02 = a
+month03 = a
+month04 = a
+month05 = a
+month06 = a
+month07 = a
+month08 = a
+month09 = a
+month10 = a
+month11 = a
+month12 = a
+DayOfTheWeekSunday = a
+
+lasso.mod <- glmnet(x1, y1,family = "binomial", alpha = 1, lambda = lambda)
+
+cv.out.lasso <- cv.glmnet(x1, y1,family = "binomial", alpha = 1, lambda = lambda)
+bestlam.lasso <- cv.out.lasso$lambda.min
+
+Private.l <- cbind(Private.x.test,month02,month03, month04,month05,month06,month07,DayOfTheWeekSunday)
+Private.pred.l <- predict(lasso.mod, s = bestlam.lasso, newx = Private.l,type = "response")
+
+Public.l <- cbind(Public.x.test,month02,month03, month08,month09,month10,month11,month12,DayOfTheWeekSunday)
+Public.pred.l <- predict(lasso.mod, s = bestlam.lasso, newx = Public.l,type = "response")
+
+
+# ridge model
+
+ridge.mod <- glmnet(x1, y1,family = "binomial", alpha = 0, lambda = lambda)
+
+cv.out.ridge <- cv.glmnet(x1, y1,family = "binomial", alpha = 0, lambda = lambda)
+bestlam.ridge <- cv.out.ridge$lambda.min
+
+#df.Private <- as.data.frame(Private.x.test)
+
+Private.pred.r <- predict(ridge.mod, s = bestlam.ridge, newx = Private.l,type = "response")
+Private.pred.r <- cbind(Private_test$ID,Private.pred.r )
+#write.table(Private.pred.r, file = "private.csv", sep = ",", col.names=FALSE, row.names = FALSE)
+
+Public.pred.r <- predict(ridge.mod, s = bestlam.ridge, newx = Public.l,type = "response")
+Public.pred.r <- cbind(Public_test$ID,Public.pred.r )
+#write.table(Public.pred.r, file = "public.csv", sep = ",", col.names=FALSE, row.names = FALSE)
+
+```
+
+###Conclusion: Perform poorly when we submit the prediction on leaderboards
+
