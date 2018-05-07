@@ -85,7 +85,7 @@ xgbTune <- caret::train(x = x,
                 trControl = ctrl)
 ```
 
-### After parameter tuning, we got nrounds=300, eta=0.02, max_depth=6, gamma = 5
+### After parameter tuning, we got nrounds=250, eta=0.01, max_depth=7, gamma =4
 #### Check model performance on test data
 ```{r}
 set.seed(111)
