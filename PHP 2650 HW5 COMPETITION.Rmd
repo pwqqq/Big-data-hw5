@@ -13,6 +13,8 @@ drat:::addRepo("dmlc")
 install.packages("xgboost", repos="http://dmlc.ml/drat/", type = "source")
 require(xgboost)
 library(klaR)
+library(stringr)
+require(reshape)
 
 ```
 
@@ -24,58 +26,39 @@ library(klaR)
 
 # read in train data
 train_total <- fread("/Users/weiqipan/Desktop/Predict_NoShow_Train.csv", header = TRUE)
-train_total <- train_total[,-4] # delete first date column
-train_total <- train_total[,-4] # delete second date column
 id <- train_total[,1] # delete ID column
 train_total <- train_total[,-1] # save ID column for further use 
+# date of appointment was made
+date_made <- data.frame(train_total$DateAppointmentWasMade)
+colnames(date_made) <- "date_made"
+date_made_table <- transform(date_made, date_made=colsplit(date_made, split="-", names=c("year","month_made","day")))
+date_made_month <- date_made_table[,1][2]
+# date of appointment
+date <- data.frame(train_total$DateOfAppointment)
+colnames(date) <- "date"
+date_table <- transform(date, date=colsplit(date, split="-", names=c("year","month","day")))
+date_month <- date_table[,1][2]
+# add back to dataframe
+train<-cbind(date_made_month,train_total)
+train<-cbind(date_month,train)
+train<-train[,-5]
+train<-train[,-5]
+```
 
-# train data 2/3
-train <- train_total[1:180000]
-# test data 1/3
-#test <- train_total[120001:180000]
-
+```{r}
 df <- data.table(train, keep.rownames = F)
 # convert dataframe to sparse matrix, which is fit for XGBOOST
 sparse_matrix <- sparse.model.matrix(Status~.-1, data = df)
 # define output vector, which is the y column
 output_vector = df[,Status] == "No-Show"
 # parameters could be redefined after discussio
-bst <- xgboost(data =sparse_matrix , label = output_vector, max.depth =10, 
-                     eta = 0.01, nthread = 2, nround = 200, objective = "binary:logistic",eval_metric="logloss")
+bst <- xgboost(data =sparse_matrix , label = output_vector, max.depth =15, 
+                     eta = 0.1, nthread=3, nround = 50, subsample=0.8, colsample_bytree=0.5, objective="binary:logistic",eval_metric="logloss")
 # another way to seperate dataset 
 #dtrain <- xgb.DMatrix(data = sparse_matrix, label = output_vector)
 #bstDMatrix <- xgboost(data = dtrain, max.depth = 2, eta = 1, nthread = 2, nround = 20, objective = "binary:logistic")
 
 # bst <- xgb.train(data=dtrain, booster = "gblinear", max.depth=2, nthread = 2, nround=2,  eval.metric = "error", eval.metric = "logloss", objective = "binary:logistic")
-
-```
-
-
-
-
-```{r}
-df2 <- data.table(test, keep.rownames = F)
-sparse_matrix2 <- sparse.model.matrix(Status~.-1, data = df2)
-predict <- predict(bst, sparse_matrix2)
-actual <- df2$Status
-
-actual[which(actual == "Show-Up")] <- "1"
-actual[which(actual == "No-Show")] <- "0"
-
-actual <- as.numeric(actual)
-
-LogLossBinary = function(actual, predicted, eps = 1e-15) {
-   predicted = pmin(pmax(predicted, eps), 1-eps)
-  - (sum(actual * log(predicted) + (1 - actual) * log(1 - predicted))) / length(actual)
-}
-
-# logistic loss
-LogLossBinary(actual = actual, predicted = predict)
-
-# RUC
-library(pROC)
-roc_obj <- roc(actual, predict)
-auc(roc_obj)
 
 ```
 
@@ -88,9 +71,23 @@ test <- fread("~/Desktop/Predict_NoShow_PrivateTest_WithoutLabels.csv", header =
 test2 <- fread("~/Desktop/Predict_NoShow_PublicTest_WithoutLabels.csv", header = TRUE)
 
 id_private <- test$ID
-test <- test[,-4] # delete first date column
-test <- test[,-4] # delete second date column
-test <- test[,-1] # delete ID column
+test <- test[,-1] # save ID column for further use 
+# date of appointment was made
+date_made <- data.frame(test$DateAppointmentWasMade)
+colnames(date_made) <- "date_made"
+date_made_table <- transform(date_made, date_made=colsplit(date_made, split="-", names=c("year","month_made","day")))
+date_made_month <- date_made_table[,1][2]
+# date of appointment
+date <- data.frame(test$DateOfAppointment)
+colnames(date) <- "date"
+date_table <- transform(date, date=colsplit(date, split="-", names=c("year","month","day")))
+date_month <- date_table[,1][2]
+# add back to dataframe
+test<-cbind(date_made_month,test)
+test<-cbind(date_month,test)
+test<-test[,-5]
+test<-test[,-5]
+
 
 fake.outcome <- c(rep(1,50),rep(1,50))
 test$Status <- fake.outcome
@@ -99,11 +96,26 @@ sparse_matrix.test <- sparse.model.matrix(Status~.-1, data = dftest)
 pred <- predict(bst, sparse_matrix.test)
 #prediction <- as.numeric(pred > 0.5)
 upload_private <- cbind(id_private, pred)
+```
 
+```{r}
 id_public <- test2$ID
-test2 <- test2[,-4] # delete first date column
-test2 <- test2[,-4] # delete second date column
-test2 <- test2[,-1] # delete ID column
+test2 <- test2[,-1] # delete ID column# date of appointment was made
+# date of appointment was made
+date_made <- data.frame(test2$DateAppointmentWasMade)
+colnames(date_made) <- "date_made"
+date_made_table <- transform(date_made, date_made=colsplit(date_made, split="-", names=c("year","month_made","day")))
+date_made_month <- date_made_table[,1][2]
+# date of appointment
+date <- data.frame(test2$DateOfAppointment)
+colnames(date) <- "date"
+date_table <- transform(date, date=colsplit(date, split="-", names=c("year","month","day")))
+date_month <- date_table[,1][2]
+# add back to dataframe
+test2<-cbind(date_made_month,test2)
+test2<-cbind(date_month,test)
+test2<-test2[,-5]
+test2<-test2[,-5]
 
 test2$Status <- fake.outcome
 dftest2 <- data.table(test2, keep.rownames = F)
@@ -118,29 +130,5 @@ write.table(upload_public, file = "public.csv", sep = ",", col.names=FALSE, row.
 
 
 
-```
-
-
-```{r}
-#KNN
-library(KODAMA)
-library(dplyr)
-library(class)
-library(gmodels)
-train_total$Gender<-as.numeric(train_total$Gender)
-train_total$DayOfTheWeek<-as.numeric(factor(train_total$DayOfTheWeek))
-train_total$Status<-as.numeric(factor(train_total$Status))
-normalize <- function(x) {
-return ((x - min(x)) / (max(x) - min(x))) }
-train[,1]<-normalize(train[,1])
-train[,3]<-normalize(train[,3])
-train.x<-as.matrix(train[,1:12])
-test[,1]<-normalize(test[,1])
-test[,3]<-normalize(test[,3])
-test.x<-as.matrix(test[,1:12])
-test.response<-test[,13]
-response<-as.matrix(train[,13])
-pred<-knn(train = train.x,test = test.x,cl=response,k=10)
-CrossTable(test.response,pred,prop.chisq = F)
 ```
 

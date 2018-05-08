@@ -9,8 +9,10 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+This project aims to predict and improve the missed opportunity rate (no-show rate) for medical centers. The data is stored in the dataset Predict_NoShow_Train.csv with 180,000 observations and 16 predictors.
 
 ```{r}
+# import libraries
 library(xgboost)
 library(data.table)
 library(Matrix)
@@ -25,10 +27,10 @@ library(caret)
 library(glmnet)
 ```
 
-
+First, we imported the original dataset and cleaned the missing data. Since no missing value was found, all the 180,000 observations are included in the following analysis and prediction. 
 ```{r}
 # Import data
-train <- fread("Predict_NoShow_Train.csv")
+train <- fread("/Users/weiqipan/Desktop/Predict_NoShow_Train.csv")
 
 # Check missing data
 
@@ -38,16 +40,90 @@ train%>%
   summarise(count_of_nas = sum(value,na.rm=T))
 
 ### there is no missing data in the dataset
+```
 
+Then, some variables are transformed or removed from the training set for better prediction. We extracted the Month and Year from the variable Date of Appointment and made Month as separate predictive variables. When making analysis, we chose to focus more on the data of appointment because the date of appointment could be correlated with the missing opportunity rate. People could chose to not show-up due to the weather or time factors. 
+```{r}
 # Manipulate date
-train$DateAppointmentWasMade <- as.Date(train$DateAppointmentWasMade)
+#train$DateAppointmentWasMade <- as.Date(train$DateAppointmentWasMade)
 train$DateOfAppointment <- as.Date(train$DateOfAppointment)
+# extract month and year information
 train$month <- format(train$DateOfAppointment,"%m")
+train$year <- format(train$DateOfAppointment,"%y")
+```
+
+To make further and more complete analysis, we made barplots to interpret the ratio of No Show-up rate in different months and years. The ratio of No-Show rate varies across the year, from the lowerst 0.282 in January to highest 0.32 in December. Because of the fluctuation, month is considered as a predictive variable in the model.
+
+```{r}
+# appointment data
+# frequency distribution for month
+month_s <- train$month[which(train$Status == "Show-Up")]
+month_ns <- train$month[which(train$Status == "No-Show")]
+
+month_s_freq <- data.frame(table(month_s))
+month_ns_freq <- data.frame(table(month_ns))
 
 
+Month <- c("01", "02","03","04","05","06","07","08","09","10","11","12")
+month_s_freq <- c(month_s_freq$Freq)
+month_ns_freq <- c(month_ns_freq$Freq)
+text <- month_ns_freq/(month_s_freq+month_ns_freq)
+data <- data.frame(Month, month_s_freq, month_ns_freq,text)
+
+p1 <- plot_ly(data, x = ~Month, y = ~month_s_freq, type = 'bar', name = 'Show-Up',text=text) %>%
+  add_trace(y = ~month_ns_freq, name = 'No-Show') %>%
+  layout(yaxis = list(title = 'Count'), barmode = 'stack')
+p1
+```
+
+Then we chose to visualize the rate of No-Show rate for year as well. From the below graph, we can tell that the No-Show rate for year 2014 and 2015 are almost the same at the level 0.30, which means that different year would not affect the No-Show rate. So, year variable is excluded from the predictive model.
+```{r}
+# appointment data
+# frequency distribution for year
+year_s <- train$year[which(train$Status == "Show-Up")]
+year_ns <- train$year[which(train$Status == "No-Show")]
+
+year_s_freq <- data.frame(table(year_s))
+year_ns_freq <- data.frame(table(year_ns))
+
+Year <- c("2014","2015")
+year_s_freq <- c(year_s_freq$Freq)
+year_ns_freq <- c(year_ns_freq$Freq)
+text <- year_ns_freq/(year_s_freq+year_ns_freq)
+data <- data.frame(Year, year_s_freq, year_ns_freq,text)
+
+p2<- plot_ly(data, x = ~Year, y = ~year_s_freq, type = 'bar', name = 'Show-Up',text=text) %>%
+  add_trace(y = ~year_ns_freq, name = 'No-Show') %>%
+  layout(yaxis = list(title = 'Count'), barmode = 'stack')
+p2
+
+
+```
+
+The data after cleaning has 180,000 observations and 14 variables and will be used as the training data later. The result No-Show is set to be 1, and Show-up as 0. Then we fit logistic regression, Penalized logistic regression, and XGBoost to train the dataset and make comparisons with the test data.
+
+```{r}
 # Remove unnecessary variable
-data.train <- subset(train, select = -c(ID,DateAppointmentWasMade,DateOfAppointment))
+data.train <- subset(train, select = -c(ID,DateAppointmentWasMade,DateOfAppointment,year))
+```
+
+The first method we tried is logistic regression.After factorization, the result is 1 when the person did not show and is 0 when the person showed up, which is a binary result. So we chose to fit a logistic regression, which could be used to model the probability of not showing up. In this model, month is factorized, and a logistic regression is fit on the 14 variables.
+```{r}
+可以在这加入内容
+
+
+
+
+
+```
+
+
+
+### Parameter Tuning
+```{r}
+# transfer data into model matrix
 data.train <- model.matrix(~., data = data.train)[,-1]
+
 
 # Change column name
 colnames(data.train)[18] <- "Status"
@@ -56,33 +132,30 @@ data.train[,18]<-abs(data.train[,18]-1)
 
 x <- subset(data.train, select = -c(Status))
 y <- subset(data.train, select = Status)
-```
 
-### Parameter Tuning
-```{r}
-grid <- expand.grid(nrounds   = 250, #c(250,300)
+system.time(grid <- expand.grid(nrounds   = 250, #c(250,300)
                     max_depth = c(6,7,8),
                     eta       = 0.01,
                     gamma     = c(4,5),
                     colsample_bytree = 0.5,
                     min_child_weight = 1,
-                    subsample = 0.5)
+                    subsample = 0.5))
 
 # 10 fold Cross-validation
-ctrl <- trainControl(method = "cv",
+system.time(ctrl <- trainControl(method = "cv",
                      number = 5,
                      summaryFunction = mnLogLoss, 
                      classProbs      = TRUE,
-                     allowParallel   = TRUE)
+                     allowParallel   = TRUE))
 
 set.seed(1234) # Set the seed to create reproducible train and test sets.
-xgbTune <- caret::train(x = x,
+system.time(xgbTune <- caret::train(x = x,
                         y=as.factor(make.names(y)),
                 method    = "xgbTree",
                 tuneGrid  = grid,
                 verbose=T,
                 metric="logLoss",
-                trControl = ctrl)
+                trControl = ctrl))
 ```
 
 ### After parameter tuning, we got nrounds=250, eta=0.01, max_depth=7, gamma =4
@@ -116,7 +189,7 @@ xgb.t <- xgb.train (params = xgb_params, data = dtrain, nrounds = 250, watchlist
 pred.t <- predict(xgb.t,x.test)
 # Test auc
 roc_obj <- roc(y.test,pred.t)
-auc(roc_obj)
+#auc(roc_obj)
 
 # Log loss
 LogLoss(pred.t, y.test)
@@ -132,8 +205,8 @@ xgb <- xgboost(data = x, label = y, nrounds = 250,eta=0.01, gamma=4, max_depth=7
 
 ```{r}
 
-Private_test <- fread("Predict_NoShow_PrivateTest_WithoutLabels.csv")
-Public_test <- fread("Predict_NoShow_PublicTest_WithoutLabels.csv")
+Private_test <- fread("/Users/weiqipan/Desktop/Predict_NoShow_PrivateTest_WithoutLabels.csv")
+Public_test <- fread("/Users/weiqipan/Desktop/Predict_NoShow_PublicTest_WithoutLabels.csv")
 #Private
 Private_test$DateOfAppointment <- as.Date(Private_test$DateOfAppointment)
 Private_test$month <- format(Private_test$DateOfAppointment,"%m")
