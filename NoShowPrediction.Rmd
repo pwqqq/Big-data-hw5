@@ -96,8 +96,6 @@ p2<- plot_ly(data, x = ~Year, y = ~year_s_freq, type = 'bar', name = 'Show-Up',t
   add_trace(y = ~year_ns_freq, name = 'No-Show') %>%
   layout(yaxis = list(title = 'Count'), barmode = 'stack')
 p2
-
-
 ```
 
 The data after cleaning has 180,000 observations and 14 variables and will be used as the training data later. The result No-Show is set to be 1, and Show-up as 0. Then we fit logistic regression, Penalized logistic regression, and XGBoost to train the dataset and make comparisons with the test data.
@@ -117,7 +115,13 @@ The first method we tried is logistic regression.After factorization, the result
 
 ```
 
+The third predictive model used is K-Nearest Neighbors algorithm which is a non-parametric method used for classification and regression. We first set sqrt(number of observations) as k-fold and then we used cross validation to select k. Finally, we find that the k with the highest accuracy and comparatively low log loss is 346. However, though the accuracy of KNN is as high as 0.686, the log loss is also very high.
+```{r}
+可以在这里加knn
 
+
+
+```
 
 ### Parameter Tuning
 ```{r}
