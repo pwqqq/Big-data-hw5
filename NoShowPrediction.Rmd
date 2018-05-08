@@ -117,10 +117,73 @@ The first method we tried is logistic regression.After factorization, the result
 
 The third predictive model used is K-Nearest Neighbors algorithm which is a non-parametric method used for classification and regression. We first set sqrt(number of observations) as k-fold and then we used cross validation to select k. Finally, we find that the k with the highest accuracy and comparatively low log loss is 346. However, though the accuracy of KNN is as high as 0.686, the log loss is also very high.
 ```{r}
-可以在这里加knn
+#KNN
+library(KODAMA)
+library(dplyr)
+library(class)
+library(data.table)
 
+train_total <- fread("Predict_NoShow_Train.csv", header = TRUE)
+train_total <- train_total[,-4] # delete first date column
+train_total <- train_total[,-4] # delete second date column
+id <- train_total[,1] # delete ID column
+train_total <- train_total[,-1] # save ID column for further use 
+train_total$Gender<-as.numeric(factor(train_total$Gender))
+train_total$DayOfTheWeek<-as.numeric(factor(train_total$DayOfTheWeek))
+train_total$Status<-as.numeric(factor(train_total$Status,levels=c("Show-Up","No-Show")))
 
+test <- fread("Predict_NoShow_PrivateTest_WithoutLabels.csv", header = TRUE)
+test <- test[,-4] # delete first date column
+test <- test[,-4] # delete second date column
+id1 <- test[,1] # delete ID column
+test <- test[,-1] # save ID column for further use 
+test$Gender<-as.numeric(factor(test$Gender))
+test$DayOfTheWeek<-as.numeric(factor(test$DayOfTheWeek))
 
+test2 <- fread("Predict_NoShow_PublicTest_WithoutLabels.csv", header = TRUE)
+test2 <- test2[,-4] # delete first date column
+test2 <- test2[,-4] # delete second date column
+id2 <- test2[,1] # delete ID column
+test2 <- test2[,-1] # save ID column for further use 
+test2$Gender<-as.numeric(factor(test2$Gender))
+test2$DayOfTheWeek<-as.numeric(factor(test2$DayOfTheWeek))
+
+# train data 2/3
+#train <- train_total[1:120000]
+# test data 1/3
+#test <- train_total[120001:180000]
+
+normalize <- function(x) {
+return ((x - min(x)) / (max(x) - min(x))) }
+
+#normalize covariates
+train_total[,1]<-normalize(train_total[,1])
+train_total[,3]<-normalize(train_total[,3])
+train.x<-as.matrix(train_total[,1:12])
+
+test[,1]<-normalize(test[,1])
+test[,3]<-normalize(test[,3])
+test.x<-as.matrix(test)
+
+test2[,1]<-normalize(test2[,1])
+test2[,3]<-normalize(test2[,3])
+test.2<-as.matrix(test2)
+
+#response variable from the train data
+response<-as.matrix(train_total[,13])
+
+#use KNN to predict private test
+pred<-knn(train = train.x,test = test.x,cl=response,k=424,prob = T)
+a<-cbind(id1,attributes(pred)$prob,pred)
+a$pred<-factor(a$pred,levels = c(1,2),labels = c(0,1))
+
+#use KNN to predict public test
+pred2<-knn(train = train.x,test = test.2,cl=response,k=424,prob = T)
+b<-cbind(id2,attributes(pred2)$prob,pred=pred2)
+b$pred<-factor(b$pred,levels = c(1,2),labels = c(0,1))
+
+#write.table(a,"private.csv",row.names = F,col.names = F,sep = ",")
+#write.table(b,"public.csv",row.names = F,col.names = F, sep = ",")
 ```
 
 ### Parameter Tuning
