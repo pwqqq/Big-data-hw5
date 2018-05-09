@@ -30,7 +30,7 @@ library(glmnet)
 First, we imported the original dataset and cleaned the missing data. Since no missing value was found, all the 180,000 observations are included in the following analysis and prediction. 
 ```{r}
 # Import data
-train <- fread("/Users/weiqipan/Desktop/Predict_NoShow_Train.csv")
+train <- fread("Predict_NoShow_Train.csv")
 
 # Check missing data
 
@@ -106,16 +106,175 @@ data.train <- subset(train, select = -c(ID,DateAppointmentWasMade,DateOfAppointm
 ```
 
 The first method we tried is logistic regression.After factorization, the result is 1 when the person did not show and is 0 when the person showed up, which is a binary result. So we chose to fit a logistic regression, which could be used to model the probability of not showing up. In this model, month is factorized, and a logistic regression is fit on the 14 variables.
+
 ```{r}
-可以在这加入内容
 
+data.train$Gender_n = ifelse(data.train$Gender=='M',1,0)
+data.train$status = ifelse(data.train$Status=='No-Show',1,0)
+day_week = model.matrix(~DayOfTheWeek-1, data.train)
 
+train = data.train %>%
+  select(-Gender, -Status, -DayOfTheWeek)
 
+train_df = cbind(train,day_week)
 
+train_numeric = data.frame(apply(train_df,2,as.numeric))
+
+train_numeric$month= as.factor(train_numeric$month)
+
+mod_logi = glm(status~., data = train_numeric, family = 'binomial')
+summary(mod_logi)
+
+pred.glm = predict(mod_logi,train_numeric[,-13],type = 'response')
+## the error massage shows: prediction from a rank-deficient fit may be misleading
+## which means the predictors might have problem of colinearity
 
 ```
 
-The third predictive model used is K-Nearest Neighbors algorithm which is a non-parametric method used for classification and regression. We first set sqrt(number of observations) as k-fold and then we used cross validation to select k. Finally, we find that the k with the highest accuracy and comparatively low log loss is 346. However, though the accuracy of KNN is as high as 0.686, the log loss is also very high.
+In order to deal with the colinearity, we conduct a PDA with mixed data, since the dataset contains continuous and categorical variables. 
+
+```{r}
+## load train dataset and two test datasets
+library(readr)
+Predict_NoShow_Train <- read_csv("Predict_NoShow_Train.csv")
+pred_pr = read_csv("Predict_NoShow_PrivateTest_WithoutLabels.csv")
+pred_pub = read_csv('Predict_NoShow_PublicTest_WithoutLabels.csv')
+
+## check the dimensions
+dim(Predict_NoShow_Train)
+dim(pred_pr)
+dim(pred_pub)
+
+## add status column to 2 test datasets
+pred_pr$Status = 'No-Show'
+pred_pub$Status = 'No-Show'
+
+## combine 3 datasets and do PCA
+all_data = rbind(Predict_NoShow_Train, pred_pr, pred_pub)
+
+all_data$Gender_n = ifelse(all_data$Gender=='M',1,0)
+
+all_data$DateAppointmentWasMade = as.Date(all_data$DateAppointmentWasMade,'%Y-%m-%d')
+all_data$DateOfAppointment = as.Date(all_data$DateOfAppointment,'%Y-%m-%d')
+
+all_data$month_of_app = as.numeric(format(all_data$DateOfAppointment, "%m"))
+all_data$status = ifelse(all_data$Status  == 'Show-Up',0,1)
+
+day_week = model.matrix(~DayOfTheWeek-1, all_data)
+
+## delete redundant variables
+library(dplyr)
+Xs =all_data %>%
+  select(-Status) %>%
+  select(-ID) %>%
+  select(-DateAppointmentWasMade) %>%
+  select(-DateOfAppointment) %>%
+  select(-Gender) %>%
+  select(-DayOfTheWeek)
+
+Xss = cbind(Xs,day_week)
+
+Xss_mix = Xss %>%
+  select(-status) %>%
+  data.frame()
+
+# to factor
+Xss_mixs = data.frame(cbind(apply(Xss_mix[,1:2],2,as.numeric),apply(Xss_mix[,-1:-2],2,as.factor)))
+
+# change first 2 variable to numeric
+Xss_mixs$Age = as.numeric(Xss_mixs$Age)
+Xss_mixs$DaysUntilAppointment = as.numeric(Xss_mixs$DaysUntilAppointment)
+
+y_train = Xss$status[1:nrow(Predict_NoShow_Train)]
+
+install.packages('PCAmixdata')
+library(PCAmixdata)
+
+X.quanti = splitmix(Xss_mixs)$X.quanti
+X.quali = splitmix(Xss_mixs)$X.quali
+
+## PCA analysis with mixed data
+X_mf = PCAmix(X.quanti, X.quali,ndim = 32,rename.level=TRUE,graph = F)
+
+# the eigenvalue and variance explained
+X_mf$eig
+
+# the orthogonal matrix 
+X_pca = X_mf$ind$coord
+
+```
+
+It is worth noting that after the PDA, we cannot use the orthogonal matrix to fit generalized linear model, since the generalized linear model. On the other hand, machine learning methods like neural network is friendly to the orthogonal data and we train a neural network in the following part.
+
+```{r}
+## convert to train data(train data after PCA) the test data(2 test data set after PCA) into data.matrix
+train_matrix = data.matrix(X_pca)[1:nrow(Predict_NoShow_Train),]
+pred_matrix = data.matrix(X_pca)[-1:-nrow(Predict_NoShow_Train),]
+
+#select a sample from train_matrix
+data_set_size1 = nrow(train_matrix) * .7
+set.seed(1234)
+indexes1 = sample(1:nrow(train_matrix), size = data_set_size1)
+
+train.x = train_matrix[indexes1,]
+test.x = train_matrix[-indexes1,]
+
+# combine predictors and outcome
+train_df = data.frame(cbind(train.x,y_train[indexes1]))
+
+# tune the parameters (takes almost 2 hours to run)
+library(caret)
+## 10 folder cross-validation
+numFolds = trainControl(method = 'cv', number = 10, classProbs = T, verboseIter = TRUE)
+
+nn_fit <- train(V33 ~ ., data = train_df, method = 'nnet', maxit = 1000,linout = 0, preProcess = c('center', 'scale'), trControl = numFolds, tuneGrid=expand.grid(size=c(11,12,13), decay=c(0.1)))
+
+## compute logistic loss for binary outcome
+#LogLossBinary = function(actual, predicted, eps = 1e-15) {
+#  predicted = pmin(pmax(predicted, eps), 1-eps)
+#  - (sum(actual * log(predicted) + (1 - actual) * log(1 - predicted))) / length(actual)
+#}
+## test the sampled data
+#results <- predict(nn_fit, newdata=data.frame(test.x))
+#LogLossBinary(y_train[-indexes1],results)
+
+## use the optimal model to predict outcome on test datasets
+results1 <- predict(nn_fit, newdata=data.frame(pred_matrix))
+
+## seperate the private and public datasets
+predict_pr = results1[1:60000]
+predict_pub = results1[-1:-60000]
+
+## combine the id with no-show probability
+prediction_pr1 = data.frame(cbind(pred_pr$ID,predict_pr))
+prediction_pub1 = data.frame(cbind(pred_pub$ID,predict_pub))
+
+#write_csv(prediction_pr1,'private.csv',col_names = F)
+#write_csv(prediction_pub1,'public.csv',col_names = F)
+
+```
+### After parameter tuning, we got size = 12, decay = 0.1
+The logistic loss of sample test data is around 0.598, which is good. Tuning the parameters however, takes almost 2 hours. Considering the time of training model, nnet might not be a good choice.
+
+#### Check model performance on test data
+```{r}
+library(nnet)
+
+## build nn
+model_nnet = nnet(V33~.,data = train_df,preProcess = c('center', 'scale'), size = 12, rang = 0.1, decay = 0.1, maxit = 1000)
+
+pred_scaled_pr = data.frame(apply(pred_matrix[1:60000,],2,function(x){(x - mean(x)) / sd(x)}))
+pred_scaled_pub = data.frame(apply(pred_matrix[-1:-60000,],2,function(x){(x - mean(x)) / sd(x)}))
+
+prediction_pr = data.frame(cbind(pred_pr$ID,predict(model_nnet,pred_scaled_pr)))
+prediction_pub = data.frame(cbind(pred_pub$ID,predict(model_nnet,pred_scaled_pub)))
+
+#write_csv(prediction_pr,'private.csv',col_names = F)
+#write_csv(prediction_pub,'public.csv',col_names = F)
+
+```
+
+The forth predictive model used is K-Nearest Neighbors algorithm which is a non-parametric method used for classification and regression. We first set sqrt(number of observations) as k-fold and then we used cross validation to select k. Finally, we find that the k with the highest accuracy and comparatively low log loss is 346. However, though the accuracy of KNN is as high as 0.686, the log loss is also very high.
 ```{r}
 #KNN
 library(KODAMA)
