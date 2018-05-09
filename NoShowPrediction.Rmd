@@ -193,15 +193,15 @@ library(PCAmixdata)
 X.quanti = splitmix(Xss_mixs)$X.quanti
 X.quali = splitmix(Xss_mixs)$X.quali
 
-## PCA analysis with mixed data
-X_mf = PCAmix(X.quanti, X.quali,ndim = 32,rename.level=TRUE,graph = F)
+## PCA analysis with mixed data and select 30 dimensions, which explain 96.60317% variance
+X_mf = PCAmix(X.quanti, X.quali,ndim = 30,rename.level=TRUE,graph = F)
 
 # the eigenvalue and variance explained
 X_mf$eig
 
 # the orthogonal matrix 
 X_pca = X_mf$ind$coord
-
+dim(X_pca)
 ```
 
 It is worth noting that after the PDA, we cannot use the orthogonal matrix to fit generalized linear model, since the generalized linear model. On the other hand, machine learning methods like neural network is friendly to the orthogonal data and we train a neural network in the following part.
@@ -221,13 +221,20 @@ test.x = train_matrix[-indexes1,]
 
 # combine predictors and outcome
 train_df = data.frame(cbind(train.x,y_train[indexes1]))
+train_df$V31 = make.names(as.factor(train_df$V31))
+
+# rename the variables
+names = make.names(paste('dim',seq(1,30,length=30)))
+colnames(train_df) = c(names,'y')
 
 # tune the parameters (takes almost 2 hours to run)
 library(caret)
 ## 10 folder cross-validation
 numFolds = trainControl(method = 'cv', number = 10, classProbs = T, verboseIter = TRUE)
 
-nn_fit <- train(V33 ~ ., data = train_df, method = 'nnet', maxit = 1000,linout = 0, preProcess = c('center', 'scale'), trControl = numFolds, tuneGrid=expand.grid(size=c(11,12,13), decay=c(0.1)))
+nn_fit <- train(y ~ ., data = train_df, method = 'nnet', maxit = 1000, linout = 0, 
+                preProcess = c('center', 'scale'), trControl = numFolds,
+                tuneGrid=expand.grid(size=c(9,11,13), decay=c(0.1,0.2)))
 
 ## compute logistic loss for binary outcome
 #LogLossBinary = function(actual, predicted, eps = 1e-15) {
@@ -235,11 +242,13 @@ nn_fit <- train(V33 ~ ., data = train_df, method = 'nnet', maxit = 1000,linout =
 #  - (sum(actual * log(predicted) + (1 - actual) * log(1 - predicted))) / length(actual)
 #}
 ## test the sampled data
+
 #results <- predict(nn_fit, newdata=data.frame(test.x))
 #LogLossBinary(y_train[-indexes1],results)
-
+pred_df = data.frame(pred_matrix)
+col_names(pred_df) = names
 ## use the optimal model to predict outcome on test datasets
-results1 <- predict(nn_fit, newdata=data.frame(pred_matrix))
+results1 <- predict(nn_fit, newdata=pred_df)
 
 ## seperate the private and public datasets
 predict_pr = results1[1:60000]
@@ -261,10 +270,10 @@ The logistic loss of sample test data is around 0.598, which is good. Tuning the
 library(nnet)
 
 ## build nn
-model_nnet = nnet(V33~.,data = train_df,preProcess = c('center', 'scale'), size = 12, rang = 0.1, decay = 0.1, maxit = 1000)
+model_nnet = nnet(y~.,data = train_df,preProcess = c('center', 'scale'), size = 12, rang = 0.1, decay = 0.1, maxit = 1000)
 
-pred_scaled_pr = data.frame(apply(pred_matrix[1:60000,],2,function(x){(x - mean(x)) / sd(x)}))
-pred_scaled_pub = data.frame(apply(pred_matrix[-1:-60000,],2,function(x){(x - mean(x)) / sd(x)}))
+pred_scaled_pr = data.frame(pred_matrix[1:60000,])
+pred_scaled_pub = data.frame(pred_matrix[-1:-60000,])
 
 prediction_pr = data.frame(cbind(pred_pr$ID,predict(model_nnet,pred_scaled_pr)))
 prediction_pub = data.frame(cbind(pred_pub$ID,predict(model_nnet,pred_scaled_pub)))
