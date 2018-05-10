@@ -194,7 +194,7 @@ X.quanti = splitmix(Xss_mixs)$X.quanti
 X.quali = splitmix(Xss_mixs)$X.quali
 
 ## PCA analysis with mixed data and select 30 dimensions, which explain 96.60317% variance
-X_mf = PCAmix(X.quanti, X.quali,ndim = 30,rename.level=TRUE,graph = F)
+X_mf = PCAmix(X.quanti, X.quali,ndim = 32,rename.level=TRUE,graph = F)
 
 # the eigenvalue and variance explained
 X_mf$eig
@@ -212,7 +212,7 @@ train_matrix = data.matrix(X_pca)[1:nrow(Predict_NoShow_Train),]
 pred_matrix = data.matrix(X_pca)[-1:-nrow(Predict_NoShow_Train),]
 
 #select a sample from train_matrix
-data_set_size1 = nrow(train_matrix) * .7
+data_set_size1 = nrow(train_matrix) * .6
 set.seed(1234)
 indexes1 = sample(1:nrow(train_matrix), size = data_set_size1)
 
@@ -221,20 +221,25 @@ test.x = train_matrix[-indexes1,]
 
 # combine predictors and outcome
 train_df = data.frame(cbind(train.x,y_train[indexes1]))
-train_df$V31 = make.names(as.factor(train_df$V31))
 
 # rename the variables
-names = make.names(paste('dim',seq(1,30,length=30)))
+names = make.names(paste('dim',seq(1,32,length=32)))
 colnames(train_df) = c(names,'y')
+```
 
+```{r}
 # tune the parameters (takes almost 2 hours to run)
 library(caret)
 ## 10 folder cross-validation
+
+## not run
 numFolds = trainControl(method = 'cv', number = 10, classProbs = T, verboseIter = TRUE)
 
 nn_fit <- train(y ~ ., data = train_df, method = 'nnet', maxit = 1000, linout = 0, 
                 preProcess = c('center', 'scale'), trControl = numFolds,
-                tuneGrid=expand.grid(size=c(9,11,13), decay=c(0.1,0.2)))
+                tuneGrid=expand.grid(size=c(13,15,12), decay=c(0.1,0.2)))
+
+ggplot(nn_fit,plotType = "scatter")
 
 ## compute logistic loss for binary outcome
 #LogLossBinary = function(actual, predicted, eps = 1e-15) {
@@ -262,7 +267,7 @@ prediction_pub1 = data.frame(cbind(pred_pub$ID,predict_pub))
 #write_csv(prediction_pub1,'public.csv',col_names = F)
 
 ```
-### After parameter tuning, we got size = 12, decay = 0.1
+### After parameter tuning, we got size = 13, decay = 0.1
 The logistic loss of sample test data is around 0.598, which is good. Tuning the parameters however, takes almost 2 hours. Considering the time of training model, nnet might not be a good choice.
 
 #### Check model performance on test data
@@ -270,7 +275,19 @@ The logistic loss of sample test data is around 0.598, which is good. Tuning the
 library(nnet)
 
 ## build nn
-model_nnet = nnet(y~.,data = train_df,preProcess = c('center', 'scale'), size = 12, rang = 0.1, decay = 0.1, maxit = 1000)
+model_nnet = nnet(y~.,data = train_df,preProcess = c('center', 'scale'), size = 13, rang = 0.1, decay = 0.1, maxit = 1000)
+
+## compute logistic loss for binary outcome
+#LogLossBinary = function(actual, predicted, eps = 1e-15) {
+#  predicted = pmin(pmax(predicted, eps), 1-eps)
+#  - (sum(actual * log(predicted) + (1 - actual) * log(1 - predicted))) / length(actual)
+#}
+## test the sampled data
+
+#results <- predict(model_nnet, newdata=data.frame(test.x))
+#LogLossBinary(y_train[-indexes1],results)
+
+
 
 pred_scaled_pr = data.frame(pred_matrix[1:60000,])
 pred_scaled_pub = data.frame(pred_matrix[-1:-60000,])
@@ -278,8 +295,8 @@ pred_scaled_pub = data.frame(pred_matrix[-1:-60000,])
 prediction_pr = data.frame(cbind(pred_pr$ID,predict(model_nnet,pred_scaled_pr)))
 prediction_pub = data.frame(cbind(pred_pub$ID,predict(model_nnet,pred_scaled_pub)))
 
-#write_csv(prediction_pr,'private.csv',col_names = F)
-#write_csv(prediction_pub,'public.csv',col_names = F)
+write_csv(prediction_pr,'private.csv',col_names = F)
+write_csv(prediction_pub,'public.csv',col_names = F)
 
 ```
 
