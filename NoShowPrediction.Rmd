@@ -190,8 +190,9 @@ Xs =all_data %>%
 Xss = cbind(Xs,day_week)
 
 ### show the correlation of covariances on a heatmap
+par(mfrow=c(1,1))
 library(gplots)
-heatmap.2(cor(Xss[1:180000,]))
+heatmap.2(cor(Xss[1:180000,]), margins = c(11,10))
 
 # delete month_of_app_made since it is correlated with month_of_app
 # delete outcome variable
